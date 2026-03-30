@@ -8,7 +8,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/yarn.lock* ./
 
 # Install dependencies
-RUN yarn install --frozen-lockfile
+RUN yarn install --frozen-lockfile || yarn install
 
 # Copy frontend source
 COPY frontend/ .
@@ -28,31 +28,32 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements and install Python dependencies
-COPY backend/requirements.txt ./backend/
-RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/requirements-docker.txt ./backend/
+RUN pip install --no-cache-dir -r backend/requirements-docker.txt
 
 # Copy backend code
-COPY backend/ ./backend/
+COPY backend/server.py ./backend/
+COPY backend/.env ./backend/ 2>/dev/null || true
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
 # Create nginx config
-RUN echo 'server { \
-    listen 80; \
-    server_name localhost; \
-    \
-    location / { \
-        root /app/frontend/build; \
-        try_files $uri $uri/ /index.html; \
-    } \
-    \
-    location /api { \
-        proxy_pass http://127.0.0.1:8001; \
-        proxy_set_header Host $host; \
-        proxy_set_header X-Real-IP $remote_addr; \
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \
-    } \
+RUN echo 'server { \n\
+    listen 80; \n\
+    server_name localhost; \n\
+    \n\
+    location / { \n\
+        root /app/frontend/build; \n\
+        try_files $uri $uri/ /index.html; \n\
+    } \n\
+    \n\
+    location /api { \n\
+        proxy_pass http://127.0.0.1:8001; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \n\
+    } \n\
 }' > /etc/nginx/sites-available/default
 
 # Create supervisor config
