@@ -33,7 +33,6 @@ RUN pip install --no-cache-dir -r backend/requirements-docker.txt
 
 # Copy backend code
 COPY backend/server.py ./backend/
-COPY backend/.env ./backend/ 2>/dev/null || true
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build
