@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  pi-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      - MONGO_URL=mongodb://mongo:27017
+      - DB_NAME=pi_monitor
+    depends_on:
+      - mongo
+    restart: unless-stopped
+    networks:
+      - pi-monitor-network
+
+  mongo:
+    image: mongo:6
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+    networks:
+      - pi-monitor-network
+
+volumes:
+  mongo-data:
+
+networks:
+  pi-monitor-network:
+    driver: bridge
