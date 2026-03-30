@@ -1,0 +1,71 @@
+{
+  "theme": "dark",
+  "archetype": "4_swiss_high_contrast",
+  "archetype_description": "Swiss & High-Contrast mixed with Retro-Futurism. A highly technical, precise, and dense 'Control Room' interface for sysadmins, inspired by modern terminal interfaces and elevated Grafana setups.",
+  "colors": {
+    "background": "#050505",
+    "surface": "#0A0A0A",
+    "surface_hover": "#111111",
+    "border": "#1A1A1A",
+    "text_primary": "#EDEDED",
+    "text_secondary": "#8A8A8A",
+    "primary_accent": "#00E5FF",
+    "pi_brand": "#C51A4A",
+    "status": {
+      "healthy": "#00FF66",
+      "warning": "#FFCC00",
+      "critical": "#FF3366"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "heading": "'IBM Plex Sans', sans-serif",
+      "body": "'Inter', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-3xl md:text-4xl tracking-tight font-medium text-white",
+      "h2": "text-xl md:text-2xl tracking-tight font-medium text-white",
+      "metric_value": "text-4xl md:text-5xl font-mono tracking-tighter font-light text-white",
+      "label": "text-xs font-mono uppercase tracking-[0.2em] text-[#8A8A8A]"
+    }
+  },
+  "layout": {
+    "strategy": "Control Room Grid",
+    "spacing": "Tight gaps (gap-4 or gap-6) for high data density.",
+    "container_padding": "p-6",
+    "host_metrics_grid": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4",
+    "container_metrics_grid": "grid grid-cols-1 lg:grid-cols-3 gap-6"
+  },
+  "components": {
+    "cards": "Flat background (#0A0A0A), sharp 1px solid border (#1A1A1A). Absolutely no box-shadows. Corner radius max 4px (rounded-sm).",
+    "charts": "Recharts wrapper. Lines should be 1.5px or 2px thick. Use primary_accent (#00E5FF) for network, pi_brand (#C51A4A) for CPU, and healthy (#00FF66) for RAM. No area fills, just sharp lines.",
+    "progress_bars": "1px height or 2px height maximum. Very minimal.",
+    "navigation": "Sticky top bar, border-b border-[#1A1A1A] bg-[#050505]/90 backdrop-blur-xl."
+  },
+  "animations": {
+    "micro_interactions": "Hover states should lighten the border color to #333333 and subtly change background to #111111.",
+    "live_indicator": "A small 6px x 6px pulsing dot (bg-[#00FF66]) next to the dashboard title to indicate real-time polling."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Stroke width 1.5, size 16px or 20px, color #8A8A8A"
+  },
+  "accessibility": {
+    "contrast": "Strict APCA/WCAG compliance for data legibility.",
+    "test_ids": "Every interactive element, metric card, and chart container MUST have a unique data-testid."
+  },
+  "images": {
+    "urls": []
+  },
+  "instructions_to_main_agent": [
+    "1. Initialize the app using .jsx/.js files (NOT .tsx). Ensure Tailwind CSS is configured for dark mode.",
+    "2. Build the UI using pure HTML/Tailwind for structural grids, and customized Shadcn UI for specific components.",
+    "3. Implement the 'Control Room Grid': Top row for Raspberry Pi host metrics (CPU, RAM, Load, Temp). Bottom section for Docker Containers.",
+    "4. Use `lucide-react` for iconography and `recharts` for the line/bar charts. Install `recharts` if not present.",
+    "5. Create a robust mock data generator that updates state every 2-3 seconds to simulate a live Grafana-style dashboard.",
+    "6. Apply 'JetBrains Mono' for all numeric values and 'IBM Plex Sans' for headings.",
+    "7. Strictly adhere to the color palette: Deep black backgrounds (#050505), sharp 1px borders (#1A1A1A), and high-contrast accents (#00E5FF, #FF3366). No generic gray blobs.",
+    "8. Ensure every metric card and important element has a `data-testid` attribute (e.g., `data-testid='host-cpu-metric'`)."
+  ]
+}
