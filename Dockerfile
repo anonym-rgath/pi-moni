@@ -15,6 +15,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     nginx \
     supervisor \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements-docker.txt ./backend/
@@ -38,24 +39,32 @@ RUN echo 'server { \n\
         proxy_pass http://127.0.0.1:8001; \n\
         proxy_set_header Host $host; \n\
         proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_read_timeout 30s; \n\
     } \n\
 }' > /etc/nginx/sites-available/default
 
-# Supervisor config (no MongoDB)
+# Supervisor config with logging
 RUN echo '[supervisord] \n\
 nodaemon=true \n\
+logfile=/var/log/supervisor/supervisord.log \n\
 \n\
 [program:nginx] \n\
 command=nginx -g "daemon off;" \n\
 autostart=true \n\
 autorestart=true \n\
+stdout_logfile=/var/log/supervisor/nginx.log \n\
+stderr_logfile=/var/log/supervisor/nginx.err.log \n\
 \n\
 [program:backend] \n\
 command=uvicorn server:app --host 0.0.0.0 --port 8001 \n\
 directory=/app/backend \n\
 autostart=true \n\
 autorestart=true \n\
+stdout_logfile=/var/log/supervisor/backend.log \n\
+stderr_logfile=/var/log/supervisor/backend.err.log \n\
 ' > /etc/supervisor/conf.d/supervisord.conf
+
+RUN mkdir -p /var/log/supervisor
 
 EXPOSE 80
 
