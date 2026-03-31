@@ -7,6 +7,15 @@ services:
     restart: unless-stopped
     networks:
       - traefik-network
+    volumes:
+      # Host metrics
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      # Docker metrics
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.monitor.rule=Host(`monitor.sau-index.de`)"
