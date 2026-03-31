@@ -9,9 +9,9 @@ services:
       - traefik-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pi-monitor.rule=Host(`monitor.sau-index.de`)"
-      - "traefik.http.routers.pi-monitor.entrypoints=web"
-      - "traefik.http.services.pi-monitor.loadbalancer.server.port=80"
+      - "traefik.http.routers.monitor.rule=Host(`monitor.sau-index.de`)"
+      - "traefik.http.routers.monitor.entrypoints=web"
+      - "traefik.http.services.monitor.loadbalancer.server.port=80"
       - "traefik.docker.network=traefik-network"
 
 networks:
