@@ -109,7 +109,13 @@ def get_uptime() -> float:
         return 0.0
 
 def get_hostname() -> str:
+    """Get actual host hostname"""
     try:
+        # Try to read from host's hostname file
+        hostname = read_file(f'{HOST_PROC}/../etc/hostname')
+        if hostname:
+            return hostname
+        # Fallback to container hostname
         return socket.gethostname()
     except:
         return "raspberrypi"
@@ -178,15 +184,27 @@ def get_containers() -> List[Dict[str, Any]]:
                     except:
                         pass
                     
-                    # Memory
+                    # Memory (handle cgroup v1 and v2)
                     try:
-                        mem_usage = stats['memory_stats'].get('usage', 0)
-                        mem_limit = stats['memory_stats'].get('limit', 1)
+                        mem_stats = stats.get('memory_stats', {})
+                        mem_usage = mem_stats.get('usage', 0)
+                        # cgroup v2 uses 'usage_in_bytes' or nested stats
+                        if mem_usage == 0:
+                            mem_usage = mem_stats.get('stats', {}).get('usage_in_bytes', 0)
+                        # Subtract cache if available (actual memory used)
+                        cache = mem_stats.get('stats', {}).get('cache', 0)
+                        mem_usage = max(0, mem_usage - cache)
+                        
+                        mem_limit = mem_stats.get('limit', 0)
+                        if mem_limit == 0 or mem_limit > 10**15:  # No limit or unrealistic
+                            mem_limit = get_memory_info()['total_mb'] * 1024 * 1024
+                        
                         container['memory']['usage_mb'] = mem_usage // (1024 * 1024)
                         container['memory']['limit_mb'] = mem_limit // (1024 * 1024)
-                        container['memory']['usage_percent'] = round((mem_usage / mem_limit) * 100, 1) if mem_limit > 0 else 0
-                    except:
-                        pass
+                        if mem_limit > 0:
+                            container['memory']['usage_percent'] = round((mem_usage / mem_limit) * 100, 1)
+                    except Exception as e:
+                        logging.warning(f"Memory parse error for {name}: {e}")
                     
                     # Network
                     try:
