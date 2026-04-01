@@ -11,13 +11,13 @@ import {
   ArrowUpFromLine,
   Server,
   Clock,
-  RefreshCw
+  RefreshCw,
+  HardDrive,
+  RotateCcw
 } from "lucide-react";
 import { 
   LineChart, 
   Line, 
-  XAxis, 
-  YAxis, 
   ResponsiveContainer,
   Tooltip
 } from "recharts";
@@ -25,22 +25,24 @@ import {
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
 
-// Format bytes to human readable
-const formatBytes = (bytes) => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+// Format uptime
+const formatUptime = (hours) => {
+  const days = Math.floor(hours / 24);
+  const h = Math.floor(hours % 24);
+  if (days > 0) return `${days}d ${h}h`;
+  const minutes = Math.floor((hours % 1) * 60);
+  return `${h}h ${minutes}m`;
 };
 
-// Format uptime
-const formatUptime = (seconds) => {
+// Format container uptime
+const formatContainerUptime = (seconds) => {
+  if (!seconds || seconds <= 0) return '-';
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
   if (days > 0) return `${days}d ${hours}h`;
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
 };
 
 // Get status color
@@ -62,7 +64,7 @@ const MetricCard = ({ title, value, unit, icon: Icon, color = "#00E5FF", subtitl
     </div>
     <div className="flex items-baseline gap-1">
       <span className="metric-value text-4xl md:text-5xl" style={{ color }}>
-        {value}
+        {value ?? '-'}
       </span>
       <span className="text-[#8A8A8A] text-lg font-mono">{unit}</span>
     </div>
@@ -73,7 +75,7 @@ const MetricCard = ({ title, value, unit, icon: Icon, color = "#00E5FF", subtitl
 );
 
 // Mini Chart Component
-const MiniChart = ({ data, dataKey, color, title }) => (
+const MiniChart = ({ data, dataKey, color }) => (
   <div className="h-16">
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data}>
@@ -137,7 +139,7 @@ const ContainerCard = ({ container }) => {
               <div 
                 className="h-full rounded-full transition-all duration-500"
                 style={{ 
-                  width: `${container.cpu.usage_percent}%`,
+                  width: `${Math.min(100, container.cpu.usage_percent)}%`,
                   backgroundColor: getStatusColor(container.cpu.usage_percent)
                 }}
               />
@@ -156,25 +158,38 @@ const ContainerCard = ({ container }) => {
               <div 
                 className="h-full rounded-full transition-all duration-500"
                 style={{ 
-                  width: `${container.memory.usage_percent}%`,
+                  width: `${Math.min(100, container.memory.usage_percent)}%`,
                   backgroundColor: getStatusColor(container.memory.usage_percent)
                 }}
               />
             </div>
           </div>
 
-          {/* Network */}
-          <div className="flex gap-4 pt-2 border-t border-[#1A1A1A]">
-            <div className="flex items-center gap-2">
-              <ArrowDownToLine size={14} className="text-[#00E5FF]" strokeWidth={1.5} />
-              <span className="text-xs font-mono text-[#8A8A8A]">
-                {container.network.rx_rate_kbps.toFixed(1)} KB/s
-              </span>
+          {/* Network & Uptime */}
+          <div className="flex justify-between pt-2 border-t border-[#1A1A1A]">
+            <div className="flex gap-3">
+              <div className="flex items-center gap-1">
+                <ArrowDownToLine size={12} className="text-[#00E5FF]" strokeWidth={1.5} />
+                <span className="text-xs font-mono text-[#8A8A8A]">
+                  {(container.network.rx_bytes / 1024 / 1024).toFixed(1)}MB
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <ArrowUpFromLine size={12} className="text-[#C51A4A]" strokeWidth={1.5} />
+                <span className="text-xs font-mono text-[#8A8A8A]">
+                  {(container.network.tx_bytes / 1024 / 1024).toFixed(1)}MB
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <ArrowUpFromLine size={14} className="text-[#C51A4A]" strokeWidth={1.5} />
+              {container.restart_count > 0 && (
+                <div className="flex items-center gap-1" title="Restarts">
+                  <RotateCcw size={10} className="text-[#FFCC00]" strokeWidth={1.5} />
+                  <span className="text-xs font-mono text-[#FFCC00]">{container.restart_count}</span>
+                </div>
+              )}
               <span className="text-xs font-mono text-[#8A8A8A]">
-                {container.network.tx_rate_kbps.toFixed(1)} KB/s
+                {formatContainerUptime(container.uptime_seconds)}
               </span>
             </div>
           </div>
@@ -183,7 +198,7 @@ const ContainerCard = ({ container }) => {
 
       {!isRunning && (
         <div className="text-center py-4 text-[#8A8A8A] text-sm">
-          Container ist gestoppt
+          Container gestoppt
         </div>
       )}
     </div>
@@ -208,7 +223,6 @@ function App() {
       setContainers(containerData);
       setLastUpdate(new Date());
       
-      // Update history for charts
       setCpuHistory(prev => {
         const newData = [...prev, { time: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), value: host.cpu.usage_percent }];
         return newData.slice(-20);
@@ -292,8 +306,8 @@ function App() {
             </span>
           </div>
 
-          {/* Host Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {/* Host Metrics Grid - 5 columns */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             <MetricCard
               title="CPU"
               value={hostMetrics?.cpu.usage_percent}
@@ -313,27 +327,36 @@ function App() {
               testId="host-ram-metric"
             />
             <MetricCard
-              title="Load Average"
-              value={hostMetrics?.load_average['1min']}
+              title="Disk"
+              value={hostMetrics?.disk?.usage_percent}
+              unit="%"
+              icon={HardDrive}
+              color={getStatusColor(hostMetrics?.disk?.usage_percent || 0)}
+              subtitle={`${hostMetrics?.disk?.used_gb} / ${hostMetrics?.disk?.total_gb} GB`}
+              testId="host-disk-metric"
+            />
+            <MetricCard
+              title="Load"
+              value={hostMetrics?.load_average?.['1min']}
               unit=""
               icon={Activity}
               color="#00E5FF"
-              subtitle={`5m: ${hostMetrics?.load_average['5min']} | 15m: ${hostMetrics?.load_average['15min']}`}
+              subtitle={`5m: ${hostMetrics?.load_average?.['5min']} | 15m: ${hostMetrics?.load_average?.['15min']}`}
               testId="host-load-metric"
             />
             <MetricCard
-              title="Temperatur"
-              value={hostMetrics?.temperature.celsius}
+              title="Temp"
+              value={hostMetrics?.temperature?.celsius}
               unit="°C"
               icon={Thermometer}
-              color={hostMetrics?.temperature.celsius > 70 ? '#FF3366' : hostMetrics?.temperature.celsius > 60 ? '#FFCC00' : '#00FF66'}
-              subtitle={`Uptime: ${formatUptime(hostMetrics?.uptime_hours * 3600 || 0)}`}
+              color={hostMetrics?.temperature?.celsius > 70 ? '#FF3366' : hostMetrics?.temperature?.celsius > 60 ? '#FFCC00' : '#00FF66'}
+              subtitle={`Uptime: ${formatUptime(hostMetrics?.uptime_hours || 0)}`}
               testId="host-temp-metric"
             />
           </div>
 
-          {/* Charts */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Charts + Swap */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-[#0A0A0A] border border-[#1A1A1A] rounded-sm p-4" data-testid="cpu-chart">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-mono uppercase tracking-wider text-[#8A8A8A]">CPU Verlauf</span>
@@ -348,6 +371,29 @@ function App() {
               </div>
               <MiniChart data={ramHistory} dataKey="value" color="#00FF66" />
             </div>
+            {hostMetrics?.memory?.swap_total_mb > 0 && (
+              <div className="bg-[#0A0A0A] border border-[#1A1A1A] rounded-sm p-4" data-testid="swap-info">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-mono uppercase tracking-wider text-[#8A8A8A]">Swap</span>
+                  <span className="text-sm font-mono" style={{ color: getStatusColor(hostMetrics?.memory?.swap_percent || 0) }}>
+                    {hostMetrics?.memory?.swap_percent}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl font-mono text-white">{hostMetrics?.memory?.swap_used_mb} MB</span>
+                  <span className="text-xs font-mono text-[#8A8A8A]">/ {hostMetrics?.memory?.swap_total_mb} MB</span>
+                </div>
+                <div className="h-1 bg-[#1A1A1A] rounded-full overflow-hidden mt-3">
+                  <div 
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ 
+                      width: `${hostMetrics?.memory?.swap_percent || 0}%`,
+                      backgroundColor: getStatusColor(hostMetrics?.memory?.swap_percent || 0)
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -362,7 +408,7 @@ function App() {
             </div>
           </div>
 
-          <div className="container-grid">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {containers.map((container) => (
               <ContainerCard key={container.id} container={container} />
             ))}
@@ -374,8 +420,8 @@ function App() {
       <footer className="border-t border-[#1A1A1A] mt-8">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between text-xs font-mono text-[#8A8A8A]">
-            <span>Pi Monitor v1.0</span>
-            <span>Refresh: {refreshInterval / 1000}s</span>
+            <span>Pi Monitor v1.1</span>
+            <span>{hostMetrics?.process_count} Prozesse</span>
           </div>
         </div>
       </footer>

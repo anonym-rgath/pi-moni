@@ -8,14 +8,16 @@ services:
     networks:
       - traefik-network
     volumes:
-      # Host metrics
+      # Host-Metriken (read-only)
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      # Docker metrics
+      - /etc/hostname:/host/etc/hostname:ro
+      # Docker-Metriken (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
+      - HOST_ETC=/host/etc
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.monitor.rule=Host(`monitor.sau-index.de`)"

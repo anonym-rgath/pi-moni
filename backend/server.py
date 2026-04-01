@@ -4,6 +4,8 @@ import logging
 import os
 import json
 import socket
+import ctypes
+import ctypes.util
 from typing import List, Dict, Any
 from datetime import datetime, timezone
 
@@ -13,6 +15,7 @@ api_router = APIRouter(prefix="/api")
 DOCKER_SOCKET = "/var/run/docker.sock"
 HOST_PROC = os.environ.get('HOST_PROC', '/proc')
 HOST_SYS = os.environ.get('HOST_SYS', '/sys')
+HOST_ETC = os.environ.get('HOST_ETC', '/etc')
 
 # CPU usage tracking
 _prev_cpu = None
@@ -66,10 +69,58 @@ def get_memory_info() -> Dict[str, Any]:
         used = total - available
         percent = round((used / total) * 100, 1) if total > 0 else 0
         
-        return {"total_mb": total, "used_mb": used, "available_mb": available, "usage_percent": percent}
+        # Swap info
+        swap_total = mem.get('SwapTotal', 0) // 1024
+        swap_free = mem.get('SwapFree', 0) // 1024
+        swap_used = swap_total - swap_free
+        swap_percent = round((swap_used / swap_total) * 100, 1) if swap_total > 0 else 0
+        
+        return {
+            "total_mb": total, 
+            "used_mb": used, 
+            "available_mb": available, 
+            "usage_percent": percent,
+            "swap_total_mb": swap_total,
+            "swap_used_mb": swap_used,
+            "swap_percent": swap_percent
+        }
     except Exception as e:
         logging.warning(f"Memory error: {e}")
-        return {"total_mb": 0, "used_mb": 0, "available_mb": 0, "usage_percent": 0}
+        return {"total_mb": 0, "used_mb": 0, "available_mb": 0, "usage_percent": 0, "swap_total_mb": 0, "swap_used_mb": 0, "swap_percent": 0}
+
+def get_disk_info() -> Dict[str, Any]:
+    """Get disk usage for root filesystem"""
+    try:
+        # Use os.statvfs for disk info
+        # Try to read from host's root via /host/proc/1/root or fallback
+        disk_path = "/"
+        
+        # Try to find the host's root mount
+        try:
+            with open(f'{HOST_PROC}/mounts', 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == '/':
+                        # Found root mount
+                        break
+        except:
+            pass
+        
+        stat = os.statvfs(disk_path)
+        total = (stat.f_blocks * stat.f_frsize) // (1024 * 1024 * 1024)  # GB
+        free = (stat.f_bavail * stat.f_frsize) // (1024 * 1024 * 1024)   # GB
+        used = total - free
+        percent = round((used / total) * 100, 1) if total > 0 else 0
+        
+        return {
+            "total_gb": total,
+            "used_gb": used,
+            "free_gb": free,
+            "usage_percent": percent
+        }
+    except Exception as e:
+        logging.warning(f"Disk error: {e}")
+        return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "usage_percent": 0}
 
 def get_cpu_info() -> Dict[str, Any]:
     cores = os.cpu_count() or 4
@@ -109,16 +160,26 @@ def get_uptime() -> float:
         return 0.0
 
 def get_hostname() -> str:
-    """Get actual host hostname"""
+    """Get actual host hostname from /etc/hostname"""
     try:
-        # Try to read from host's hostname file
-        hostname = read_file(f'{HOST_PROC}/../etc/hostname')
+        hostname = read_file(f'{HOST_ETC}/hostname')
         if hostname:
             return hostname
-        # Fallback to container hostname
-        return socket.gethostname()
     except:
-        return "raspberrypi"
+        pass
+    return socket.gethostname()
+
+def get_process_count() -> int:
+    """Count running processes"""
+    try:
+        count = 0
+        proc_dir = HOST_PROC
+        for entry in os.listdir(proc_dir):
+            if entry.isdigit():
+                count += 1
+        return count
+    except:
+        return 0
 
 def docker_request(endpoint: str, timeout: float = 2.0) -> Any:
     """Query Docker API with timeout"""
@@ -141,7 +202,6 @@ def docker_request(endpoint: str, timeout: float = 2.0) -> Any:
                 break
         sock.close()
         
-        # Parse response body
         if b"\r\n\r\n" in response:
             body = response.split(b"\r\n\r\n", 1)[1]
             return json.loads(body.decode('utf-8', errors='ignore'))
@@ -160,6 +220,12 @@ def get_containers() -> List[Dict[str, Any]]:
             name = c.get('Names', ['/unknown'])[0].lstrip('/')
             state = c.get('State', 'unknown')
             container_id = c.get('Id', '')[:12]
+            created = c.get('Created', 0)
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if state == "running" and created:
+                uptime_seconds = int(datetime.now(timezone.utc).timestamp() - created)
             
             container = {
                 "id": container_id,
@@ -168,7 +234,8 @@ def get_containers() -> List[Dict[str, Any]]:
                 "cpu": {"usage_percent": 0.0},
                 "memory": {"usage_mb": 0, "limit_mb": 0, "usage_percent": 0.0},
                 "network": {"rx_bytes": 0, "tx_bytes": 0, "rx_rate_kbps": 0.0, "tx_rate_kbps": 0.0},
-                "uptime_seconds": 0
+                "uptime_seconds": uptime_seconds,
+                "restart_count": 0
             }
             
             if state == "running":
@@ -184,19 +251,29 @@ def get_containers() -> List[Dict[str, Any]]:
                     except:
                         pass
                     
-                    # Memory (handle cgroup v1 and v2)
+                    # Memory - Fixed for cgroup v2
                     try:
                         mem_stats = stats.get('memory_stats', {})
+                        
+                        # Try different memory fields (cgroup v1 vs v2)
                         mem_usage = mem_stats.get('usage', 0)
-                        # cgroup v2 uses 'usage_in_bytes' or nested stats
+                        
+                        # For cgroup v2, subtract inactive_file (cache)
+                        stats_detail = mem_stats.get('stats', {})
+                        if stats_detail:
+                            inactive_file = stats_detail.get('inactive_file', 0)
+                            cache = stats_detail.get('cache', 0)
+                            mem_usage = max(0, mem_usage - inactive_file - cache)
+                        
+                        # If still 0, try alternative field
                         if mem_usage == 0:
-                            mem_usage = mem_stats.get('stats', {}).get('usage_in_bytes', 0)
-                        # Subtract cache if available (actual memory used)
-                        cache = mem_stats.get('stats', {}).get('cache', 0)
-                        mem_usage = max(0, mem_usage - cache)
+                            mem_usage = mem_stats.get('rss', 0)
+                        if mem_usage == 0:
+                            mem_usage = stats_detail.get('anon', 0)
                         
                         mem_limit = mem_stats.get('limit', 0)
-                        if mem_limit == 0 or mem_limit > 10**15:  # No limit or unrealistic
+                        # If limit is unrealistic (> 100TB), use host memory
+                        if mem_limit == 0 or mem_limit > 10**14:
                             mem_limit = get_memory_info()['total_mb'] * 1024 * 1024
                         
                         container['memory']['usage_mb'] = mem_usage // (1024 * 1024)
@@ -213,6 +290,14 @@ def get_containers() -> List[Dict[str, Any]]:
                             container['network']['tx_bytes'] += net.get('tx_bytes', 0)
                     except:
                         pass
+                
+                # Get restart count from inspect
+                try:
+                    inspect = docker_request(f"/containers/{container_id}/json", timeout=2.0)
+                    if inspect:
+                        container['restart_count'] = inspect.get('RestartCount', 0)
+                except:
+                    pass
             
             containers.append(container)
     except Exception as e:
@@ -231,9 +316,11 @@ async def get_host_metrics():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "cpu": {"usage_percent": get_cpu_usage(), "cores": cpu_info["cores"], "frequency_mhz": cpu_info["frequency_mhz"]},
         "memory": get_memory_info(),
+        "disk": get_disk_info(),
         "load_average": get_load_average(),
         "temperature": {"celsius": get_temperature()},
         "uptime_hours": get_uptime(),
+        "process_count": get_process_count(),
         "hostname": get_hostname()
     }
 
@@ -249,9 +336,11 @@ async def get_all_metrics():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "cpu": {"usage_percent": get_cpu_usage(), "cores": cpu_info["cores"], "frequency_mhz": cpu_info["frequency_mhz"]},
             "memory": get_memory_info(),
+            "disk": get_disk_info(),
             "load_average": get_load_average(),
             "temperature": {"celsius": get_temperature()},
             "uptime_hours": get_uptime(),
+            "process_count": get_process_count(),
             "hostname": get_hostname()
         },
         "containers": get_containers()
