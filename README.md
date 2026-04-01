@@ -40,11 +40,14 @@ Pi Monitor ist eine selbst-gehostete Monitoring-Webseite, die Echtzeit-Metriken 
 |--------|--------------|--------|
 | **CPU-Auslastung** | Prozentuale CPU-Last | `/proc/stat` |
 | **CPU-Frequenz** | Aktuelle Taktfrequenz in MHz | `/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq` |
-| **RAM-Nutzung** | Genutzter/Verfügbarer Speicher | `/proc/meminfo` |
-| **Load Average** | 1m, 5m, 15m Durchschnitt | `/proc/loadavg` |
+| **RAM-Nutzung** | Genutzter/Verfügbarer Speicher in MB | `/proc/meminfo` |
+| **Swap-Nutzung** | Swap-Speicher verwendet/gesamt | `/proc/meminfo` |
+| **Disk-Speicher** | SD-Karte verwendet/gesamt in GB | `os.statvfs` |
+| **Load Average** | 1m, 5m, 15m Systemlast | `/proc/loadavg` |
 | **Temperatur** | CPU-Kerntemperatur in °C | `/sys/class/thermal/thermal_zone0/temp` |
-| **Uptime** | Betriebszeit in Stunden | `/proc/uptime` |
+| **Uptime** | Betriebszeit in Tagen/Stunden | `/proc/uptime` |
 | **Hostname** | System-Hostname | `/etc/hostname` |
+| **Prozesse** | Anzahl laufender Prozesse | `/proc` |
 
 ### Container-Metriken (Docker)
 
@@ -53,17 +56,24 @@ Pi Monitor ist eine selbst-gehostete Monitoring-Webseite, die Echtzeit-Metriken 
 | **Status** | running / stopped | Docker API |
 | **CPU %** | CPU-Auslastung pro Container | Docker Stats API |
 | **RAM** | Speicherverbrauch in MB | Docker Stats API |
-| **Netzwerk RX** | Empfangene Bytes | Docker Stats API |
-| **Netzwerk TX** | Gesendete Bytes | Docker Stats API |
+| **Netzwerk RX** | Empfangene Daten in MB | Docker Stats API |
+| **Netzwerk TX** | Gesendete Daten in MB | Docker Stats API |
+| **Uptime** | Container-Laufzeit | Docker API |
+| **Restart Count** | Anzahl Neustarts | Docker Inspect API |
 
 ### UI Features
 
 - Grafana-ähnliches Dark-Theme (#050505 Hintergrund)
 - Responsive Design (Mobile, Tablet, Desktop)
-- Live-Verlaufsgraphen für CPU und RAM
-- Farbcodierte Status-Anzeigen (Grün/Gelb/Rot)
+- Live-Verlaufsgraphen für CPU und RAM (letzte 20 Datenpunkte)
+- Swap-Anzeige (nur wenn Swap konfiguriert)
+- Farbcodierte Status-Anzeigen:
+  - 🟢 Grün: < 60%
+  - 🟡 Gelb: 60-80%
+  - 🔴 Rot: > 80%
 - Konfigurierbares Refresh-Intervall (2s, 3s, 5s, 10s)
 - Pulsierender Live-Indikator
+- Prozess-Anzahl im Footer
 
 ---
 
@@ -85,6 +95,7 @@ Pi Monitor ist eine selbst-gehostete Monitoring-Webseite, die Echtzeit-Metriken 
 │  └─────────────┘    │       │    │ Volume Mounts:   │ │    │
 │                     │       │    │ • /proc (ro)     │ │    │
 │                     │       │    │ • /sys (ro)      │ │    │
+│                     │       │    │ • /etc/hostname  │ │    │
 │                     │       │    │ • docker.sock(ro)│ │    │
 │                     │       │    └──────────────────┘ │    │
 │                     └───────┴─────────────────────────┘    │
@@ -200,11 +211,13 @@ services:
       # Host-Metriken (read-only)
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      - /etc/hostname:/host/etc/hostname:ro
       # Docker-Metriken (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
+      - HOST_ETC=/host/etc
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.monitor.rule=Host(`monitor.example.com`)"
@@ -217,20 +230,33 @@ networks:
     external: true
 ```
 
+### Volume Mounts
+
+| Mount | Zweck |
+|-------|-------|
+| `/proc:/host/proc:ro` | CPU, RAM, Load, Uptime, Prozesse |
+| `/sys:/host/sys:ro` | Temperatur, CPU-Frequenz |
+| `/etc/hostname:/host/etc/hostname:ro` | Hostname des Pi |
+| `/var/run/docker.sock:ro` | Docker Container Metriken |
+
 ### Umgebungsvariablen
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
 | `HOST_PROC` | `/host/proc` | Pfad zum gemounteten /proc |
 | `HOST_SYS` | `/host/sys` | Pfad zum gemounteten /sys |
+| `HOST_ETC` | `/host/etc` | Pfad zum gemounteten /etc |
 
 ### Frontend Konfiguration
 
 Das Refresh-Intervall kann im UI oben rechts geändert werden:
-- 2 Sekunden (höchste Last)
-- 3 Sekunden (Standard)
-- 5 Sekunden
-- 10 Sekunden (niedrigste Last)
+
+| Intervall | Empfehlung |
+|-----------|------------|
+| 2 Sekunden | Debugging, hohe CPU-Last |
+| 3 Sekunden | Standard, guter Kompromiss |
+| 5 Sekunden | Normale Nutzung |
+| 10 Sekunden | Niedrige Last, Langzeit-Monitoring |
 
 ---
 
@@ -330,7 +356,16 @@ Raspberry Pi Host-Metriken
     "total_mb": 3796,
     "used_mb": 1019,
     "available_mb": 2777,
-    "usage_percent": 26.8
+    "usage_percent": 26.8,
+    "swap_total_mb": 100,
+    "swap_used_mb": 0,
+    "swap_percent": 0.0
+  },
+  "disk": {
+    "total_gb": 32,
+    "used_gb": 8,
+    "free_gb": 24,
+    "usage_percent": 25.0
   },
   "load_average": {
     "1min": 0.65,
@@ -341,7 +376,8 @@ Raspberry Pi Host-Metriken
     "celsius": 52.6
   },
   "uptime_hours": 23.4,
-  "hostname": "raspberrypi"
+  "process_count": 142,
+  "hostname": "pi4gath"
 }
 ```
 
@@ -372,7 +408,8 @@ Docker Container-Metriken
       "rx_rate_kbps": 0.0,
       "tx_rate_kbps": 0.0
     },
-    "uptime_seconds": 3600
+    "uptime_seconds": 3600,
+    "restart_count": 0
   }
 ]
 ```
@@ -381,7 +418,7 @@ Docker Container-Metriken
 
 #### GET /api/metrics/all
 
-Alle Metriken kombiniert
+Alle Metriken kombiniert (empfohlen für Dashboard)
 
 **Response:**
 ```json
@@ -406,10 +443,18 @@ Alle Metriken kombiniert
 
 ### Was wird offengelegt?
 
-- CPU/RAM/Temperatur-Werte
-- Container-Namen (z.B. "nginx", "postgres")
+- CPU/RAM/Disk/Temperatur-Werte
+- Container-Namen und Status
 - Hostname des Pi
-- Uptime
+- Uptime und Prozess-Anzahl
+
+### Volume-Mount Sicherheit
+
+Alle Mounts sind **read-only** (`:ro`):
+- `/proc` - Nur Lesen von Systemmetriken
+- `/sys` - Nur Lesen von Hardware-Info
+- `/etc/hostname` - Nur Hostname
+- `docker.sock` - Nur Container-Info abfragen
 
 ---
 
